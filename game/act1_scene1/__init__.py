@@ -9,6 +9,7 @@ from engine import ui
 from engine import cam
 from engine import gamestate
 from engine import convo
+from engine import scenehandler
 
 # myscene is set by scene.py
 myscene = None
@@ -23,6 +24,7 @@ def init():
     # gamestate.event_manager.enter_cutscene()
     myscene.actors['levity'].prepare_walkpath_move("levity_4")
     myscene.actors['levity'].next_action()
+    scenehandler.soundplayer.play_track("simple.ogg")
 
 def inga_walk(actor, point):
     if point == "inga_attempt_silver_class":
