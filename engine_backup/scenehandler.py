@@ -10,7 +10,7 @@ import json
 
 import pyglet
 
-import gamestate, actionsequencer, util, interpolator, scene
+import gamestate, actionsequencer, util, interpolator, scene, soundplayer
 
 FADE = 0
 UP = 1
@@ -33,6 +33,10 @@ class SceneHandler(actionsequencer.ActionSequencer):
         scene_transition_img = util.load_image(util.respath('environments', 'transitions', 'test.png'))
         self.sprite = pyglet.sprite.Sprite(scene_transition_img, x = 0, y = 0, batch=self.batch)
         self.sprite.opacity = 0
+
+        #Sound player
+        self.sound_player = soundplayer.SoundPlayer()
+        self.sound_player._init_()
     
     def set_first_scene(self, scn):
         self.set_scenes(scn)
@@ -146,6 +150,7 @@ class SceneHandler(actionsequencer.ActionSequencer):
         
         for scn in self.scenes:
             scn.update(dt)
+        self.sound_player.update()
     
     def draw_scenes(self):
         for scn in self.scenes:

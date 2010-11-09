@@ -9,9 +9,7 @@ from engine import ui
 from engine import cam
 from engine import gamestate
 from engine import convo
-from engine import scenehandler
 from engine import util
-
 
 # myscene is set by scene.py
 myscene = None
@@ -26,7 +24,6 @@ temperature = 72
 
 def init(fresh=False):
     myscene.ui.inventory.visible = True
-    scenehandler.soundplayer.play_track("simple.ogg")
     
     myscene.begin_background_conversation("mumblestiltskin")
     
