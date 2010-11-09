@@ -1,0 +1,13 @@
+# Initialization
+
+at_rest:
+    main: stand_left
+
+
+speaking:
+    main: stand_left
+
+variables:
+
+start:
+    main: hmmm...
