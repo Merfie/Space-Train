@@ -5,12 +5,15 @@ TODO:
 - Preload conversations (make sure to *copy*, not *reference* convo_info)
 """
 
-import pyglet, yaml, collections, functools
+import pyglet, yaml, collections, functools, re
 import actor
 from util import draw
 
 # Convenience function for creating defaultdicts that return None if key not present
 nonedict = functools.partial(collections.defaultdict, lambda: None)
+
+# Match 'give:' syntax
+parens_match = re.compile(r'(?P<name>[^(]+\S+)\s+\((?P<id>[^)]+)\)')
 
 class Conversation(object):
     """
@@ -56,6 +59,9 @@ class Conversation(object):
             Add a new instance of <actor_name> to the inventory with an ID of the form actor_name_#,
             where # is the highest unused number in this form.
         
+        give: <actor_name> (new_id)
+            Like give, but you can also specify the object's identifier string.
+        
         actor_id: <text>
             Make an actor speak a phrase. Delay the next action.
             
@@ -70,6 +76,13 @@ class Conversation(object):
             EXAMPLE:
                 bean_salesman:
                     action: jump
+        
+        update_animations:
+            Update the animations dictionary (top level dictionary), like so:
+            
+            - update_animations:
+                at_rest:
+                    main: stand_front
         
         update_locals:
             name: value
@@ -101,7 +114,7 @@ class Conversation(object):
             
             (hide_after_use is somewhat redundant to update_locals+require, but it's convenient.)
     """
-    def __init__(self, scn):
+    def __init__(self, scn, background=False):
         super(Conversation, self).__init__()
         self.scene = scn
         
@@ -110,13 +123,11 @@ class Conversation(object):
         self.animations = None
         self.convo_lines = None
         self.convo_position = 0
-        
-        self.convo_label = pyglet.text.Label("", color = (0,0,0,255), font_size=12, 
-                                             anchor_x='center', anchor_y='bottom',
-                                             multiline=True, width=400)
+        self.background = background
+        self.convo_label = None
     
     def delete(self):
-        self.convo_label.delete()
+        pass
     
     active = property(lambda self: self.convo_name is not None)
     
@@ -128,15 +139,19 @@ class Conversation(object):
     
     def draw(self):
         """Draw dialogue box and text"""
-        if self.convo_label.text:
+        if self.convo_label:
             draw.set_color(1,1,1,1)
             x = self.convo_label.x
             y = self.convo_label.y
             w = self.convo_label.content_width
             h = self.convo_label.content_height
             
-            rect_args = (x - (400 / 2) - 5,  y - 5,
-                         x + (400 / 2) + 5,  y + h + 5)
+            if self.convo_label.multiline:
+                rect_args = (x - (400 / 2) - 5,  y - 5,
+                             x + (400 / 2) + 5,  y + h + 5)
+            else:
+                rect_args = (x - (w / 2) - 5,  y - 5,
+                             x + (w / 2) + 5,  y + h + 5)
 
             draw.rect(*rect_args)
             draw.set_color(0,0,0,1)
@@ -163,14 +178,21 @@ class Conversation(object):
             # Variables default to None
             self.convo_info['variables'] = nonedict(self.convo_info['variables'])
             # Bare minimum of animations
-            self.animations = {
-                'at_rest': {
-                    'main': 'stand_right'
-                },
-                'speaking': {
-                    'main': 'talk_right'
+            if self.background:
+                # Probably doesn't move the player around
+                self.animations = {
+                    'at_rest': {},
+                    'speaking': {}
                 }
-            }
+            else:
+                self.animations = {
+                    'at_rest': {
+                        'main': 'stand_right'
+                    },
+                    'speaking': {
+                        'main': 'talk_right'
+                    }
+                }
             # Add animations from YAML file
             self._update_anim_dict(self.convo_info)
             
@@ -190,14 +212,21 @@ class Conversation(object):
     
     def _update_locals(self, val):
         """Update variables dictionary"""
-        for val in v:
+        for v in val:
             self.scene.handler.game_variables.update(v)
         return True
     
     def _give(self, val):
-        print 'give', val
-        new_actor = self.scene.new_actor(val)
+        match = parens_match.match(val)
+        if match:
+            new_actor = self.scene.new_actor(match.group('name'), match.group('id'))
+        else:
+            new_actor = self.scene.new_actor(val)
         self.scene.ui.inventory.put_item(new_actor)
+        return True
+    
+    def _take(self, val):
+        self.scene.ui.inventory.get_item(val)
         return True
     
     def _update_animations(self, val):
@@ -210,7 +239,7 @@ class Conversation(object):
         """Start executing a different action list"""
         self.convo_position = 0
         self.convo_lines = self.convo_info[val]
-        if self.scene.ui.cam:
+        if self.scene.ui.cam and not self.background:
             self.scene.ui.cam.set_visible(False)
         return True
     
@@ -253,8 +282,10 @@ class Conversation(object):
         temp_choices = choices.copy()
         for choice, tags in choices.viewitems():
             if tags.has_key('require'):
-                in_local = self.convo_info['variables'][tags['require']]
-                in_global = self.scene.handler.game_variables[tags['require']]
+                in_local = (tags['require'] in self.convo_info['variables']) \
+                            and self.convo_info['variables'][tags['require']]
+                in_global = (tags['require'] in self.scene.handler.handler.game_variables) \
+                            and self.scene.handler.handler.game_variables[tags['require']]
                 if not in_local or in_global:
                     del temp_choices[choice]
         return temp_choices
@@ -282,12 +313,22 @@ class Conversation(object):
         act = self.scene.actors[actor_id]
         if isinstance(arg, str):
             act.update_state(self.animations['speaking'][actor_id])
-            self.convo_label.begin_update()
-            self.convo_label.x = act.sprite.x
-            self.convo_label.y = act.sprite.y + 20 + \
-                                 act.current_image().height - act.current_image().anchor_y
-            self.convo_label.text = arg
-            self.convo_label.end_update()
+            self.clear_speech_bubble()
+            if len(arg) > 47:
+                self.convo_label = pyglet.text.Label(arg, color = (0,0,0,255), font_size=12, 
+                                                     anchor_x='center', anchor_y='bottom',
+                                                     x=act.sprite.x,
+                                                     y=act.sprite.y + 20 + \
+                                                        act.current_image().height - \
+                                                        act.current_image().anchor_y,
+                                                     multiline=True, width=400)
+            else:
+                self.convo_label = pyglet.text.Label(arg, color = (0,0,0,255), font_size=12, 
+                                                     anchor_x='center', anchor_y='bottom',
+                                                     x=act.sprite.x,
+                                                     y=act.sprite.y + 20 + \
+                                                        act.current_image().height - \
+                                                        act.current_image().anchor_y)
             self.scene.clock.schedule_once(self.next_line, max(len(arg)*0.05, 3.0))
         else:
             if arg.has_key('action'):
@@ -296,9 +337,9 @@ class Conversation(object):
     
     def clear_speech_bubble(self):
         """Clear all spoken text"""
-        self.convo_label.begin_update()
-        self.convo_label.text = ""
-        self.convo_label.end_update()
+        if self.convo_label:
+            self.convo_label.delete()
+            self.convo_label = None
     
     def stop_speaking(self, dt=0):
         """Stop the cutscene"""

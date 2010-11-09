@@ -10,6 +10,8 @@ from engine import cam
 from engine import gamestate
 from engine import convo
 from engine import scenehandler
+from engine import util
+
 
 # myscene is set by scene.py
 myscene = None
@@ -18,25 +20,40 @@ levity_exposition = False
 levity_direction = "right"
 
 do_sit = False
+sneelock_distracted = False
 
-def init():
+temperature = 72
+
+def init(fresh=False):
     myscene.ui.inventory.visible = True
-    # gamestate.event_manager.enter_cutscene()
-    myscene.actors['levity'].prepare_walkpath_move("levity_4")
-    myscene.actors['levity'].next_action()
     scenehandler.soundplayer.play_track("simple.ogg")
+    
+    myscene.begin_background_conversation("mumblestiltskin")
+    
+    if fresh:
+        myscene.interaction_enabled = False
+        # gamestate.event_manager.enter_cutscene()
+        myscene.actors['levity'].prepare_walkpath_move("levity_4")
+        myscene.actors['levity'].next_action()
+    
+        spcbux = myscene.new_actor('space_bucks', 'space_bucks')
+        myscene.ui.inventory.put_item(spcbux)
 
 def inga_walk(actor, point):
+    global do_sit
+    global sneelock_distracted
     if point == "inga_attempt_silver_class":
-        if not myscene.ui.inventory.has_item("membership_card"):        # TODO: PLACEHOLDER CONDITION
+        if not sneelock_distracted:
             sneelock = myscene.actors['sneelock']
             sneelock.prepare_walkpath_move("sneelock_block")
             sneelock.next_action()
             myscene.convo.begin_conversation("you_shall_not_pass")
     if re.match("seat_\d+", point) and do_sit:
-        myscene.actors['main'].current_state = "sit"
+        myscene.actors['main'].update_state("sit")
+        do_sit = False
             
 def inga_sit(seat):
+    global do_sit
     inga = myscene.actors['main']
     inga.prepare_walkpath_move(seat.identifier)
     inga.next_action()
@@ -57,8 +74,8 @@ def levity_walk(actor, point):
             levity_direction = "left"
             next_point = "levity_4"
         #levity.prepare_walkpath_move(next_point)
-        #pyglet.clock.schedule_once(levity.prepare_walkpath_move(next_point), 25)
-        pyglet.clock.schedule_once(levity.next_action, 26)
+        pyglet.clock.schedule_once(util.make_dt_wrapper(levity.prepare_walkpath_move), 1, next_point)
+        pyglet.clock.schedule_once(levity.next_action, 60)
         
     else:
         if point == "levity_1":
@@ -80,32 +97,46 @@ def levity_walk(actor, point):
             levity.prepare_walkpath_move(next_point)
     print "Moving from %s to %s..." % (point, next_point)
 
+def tourist_walk(actor, point):
+    global sneelock_distracted
+    if point == "tourist_complain":
+        sneelock_distracted = True
+        myscene.begin_background_conversation("its_too_hot")
+        
+def sneelock_walk(actor, point):
+    if point == "sneelock_inspect":
+        pyglet.clock.schedule_once(util.make_dt_wrapper(myscene.begin_background_conversation), 5, "sneelock_checks_it_out")
+    
 def end_conversation(convo_name):
     if convo_name == "introduction":
-        # Create the items to be given to Inga
-    #     nuts = actor.Actor("tasty_nuts", "tasty_nuts", scene = myscene, attrs = {'start_state': 'tasty_nuts'})
-    #     myscene.add_actor(nuts)
-    #     myscene.ui.inventory.put_item(nuts)
-    #     
-    #     lemonade = actor.Actor("lemonade", "lemonade", scene = myscene, attrs = {'start_state': 'lemonade'})
-    #     myscene.add_actor(lemonade)
-    #     myscene.ui.inventory.put_item(lemonade)
-    #     
-    #     myscene.begin_conversation("introduction_continued")
-    #     myscene.begin_background_conversation("mumblestiltskin")
-    # if convo_name == "introduction_continued":
-        #Set levity to do her walk around the level
+        myscene.interaction_enabled = True
         myscene.actors['levity'].prepare_walkpath_move("levity_right")
         myscene.actors['levity'].next_action()
-        # gamestate.event_manager.exit_cutscene()
+        myscene.handler.handler.save()
 
+    if convo_name == "you_shall_not_pass":
+        myscene.actors['sneelock'].prepare_walkpath_move("sneelock_guard")
+        myscene.actors['sneelock'].next_action()
+
+        myscene.actors['main'].prepare_walkpath_move("point_6")
+        myscene.actors['main'].next_action()
+        
+        myscene.handler.handler.save()
+    
+    if convo_name == "its_too_hot":
+        myscene.actors['sneelock'].prepare_walkpath_move("sneelock_inspect")
+        myscene.actors['sneelock'].next_action()
+        myscene.handler.handler.save()
+        
 def talk_to_briggs():
-    #myscene.end_background_conversation('mumblestiltskin')
+    myscene.end_background_conversation('mumblestiltskin')
     myscene.begin_conversation("briggs_exposition")
 
 walk_handlers = {
     'main': inga_walk,
-    'levity': levity_walk
+    'levity': levity_walk,
+    'tourist': tourist_walk,
+    'sneelock': sneelock_walk
 }
 
 def handle_event(event, *args):
@@ -117,10 +148,21 @@ def handle_event(event, *args):
             walk_handlers[actor.identifier](actor, point)
     print "Handled", event, "with", args
 
+def set_temperature(temp):
+    print "Setting temp"
+    global temperature
+    temperature = temp
+    if temperature >= 80:
+        # Nicole complains!
+        tourist = myscene.actors['tourist']
+        pyglet.clock.schedule_once(util.make_dt_wrapper(tourist.prepare_walkpath_move), 5, "tourist_complain")
+        pyglet.clock.schedule_once(tourist.next_action, 5)
+    
 def actor_clicked(clicked_actor):
     print clicked_actor
     if re.match("seat_\d+", clicked_actor.identifier) and clicked_actor.current_state == "couch":
-        myscene.ui.show_cam(clicked_actor, {'Sit': lambda: inga_sit(clicked_actor) })
+        if clicked_actor.identifier in myscene.info['walkpath']['points']:
+            myscene.ui.show_cam(clicked_actor, {'Sit': lambda: inga_sit(clicked_actor) })
     if clicked_actor.identifier == "gregg_briggs":
         #show a CAM with options
         myscene.ui.show_cam(clicked_actor, {'Greet the Odd Fellow': talk_to_briggs, 'Avoid Eye Contact': None})
@@ -130,3 +172,10 @@ def actor_clicked(clicked_actor):
         myscene.begin_conversation("making_connections")
     if clicked_actor.identifier == "shamus":
         myscene.begin_conversation("a_young_irish_boy")
+    if clicked_actor.identifier == "hipster_amanda" or clicked_actor.identifier == "hipster_liam" or clicked_actor.identifier == "hipster_fran":
+        if not sneelock_distracted:
+            myscene.begin_conversation("grunt")
+        else:
+            myscene.begin_conversation("hipsterz")
+    if clicked_actor.identifier == "thermostat":
+        myscene.ui.show_cam(clicked_actor, {'Inspect': None, 'Raise Temperature': lambda: set_temperature(80)})
